@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet new *)",
+      "Bash(dotnet sln *)",
+      "Bash(dotnet add *)",
+      "Bash(Remove-Item \"d:\\\\Repos\\\\MailToBexio\\\\src\\\\MailToBexio\\\\Worker.cs\" -Force)",
+      "Bash(New-Item -ItemType Directory -Force \"d:\\\\Repos\\\\MailToBexio\\\\src\\\\MailToBexio\\\\Models\")",
+      "Bash(Out-Null)",
+      "Bash(New-Item -ItemType Directory -Force \"d:\\\\Repos\\\\MailToBexio\\\\src\\\\MailToBexio\\\\Services\\\\AI\")",
+      "Bash(New-Item -ItemType Directory -Force \"d:\\\\Repos\\\\MailToBexio\\\\src\\\\MailToBexio\\\\Configuration\")",
+      "Bash(New-Item -ItemType Directory -Force \"d:\\\\Repos\\\\MailToBexio\\\\src\\\\MailToBexio\\\\Workers\")",
+      "Bash(dotnet build *)",
+      "PowerShell(New-Item -ItemType Directory -Force \"d:\\\\Repos\\\\MailToBexio\\\\.github\\\\workflows\")"
+    ]
+  }
+}

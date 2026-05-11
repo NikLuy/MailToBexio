@@ -1,0 +1,24 @@
+services:
+  mailtobexio:
+    build: .
+    image: mailtobexio:latest
+    container_name: mailtobexio
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - Graph__TenantId=${AZURE_TENANT_ID}
+      - Graph__ClientId=${AZURE_CLIENT_ID}
+      - Graph__ClientSecret=${AZURE_CLIENT_SECRET}
+      - Graph__TargetMailboxUpn=${TARGET_MAILBOX_UPN}
+      - Bexio__ApiKey=${BEXIO_API_KEY}
+      - AI__Provider=${AI_PROVIDER}
+      - AI__CopilotEndpoint=${COPILOT_ENDPOINT}
+      - AI__CopilotApiKey=${COPILOT_API_KEY}
+      - AI__CopilotDeploymentName=${COPILOT_DEPLOYMENT_NAME}
+      - AI__GeminiApiKey=${GEMINI_API_KEY}
+      - AI__OllamaBaseUrl=${OLLAMA_BASE_URL}
+      - AI__OllamaModel=${OLLAMA_MODEL}
+      - Worker__IntervalMinutes=${WORKER_INTERVAL_MINUTES}
+    volumes:
+      - ./logs:/app/logs
