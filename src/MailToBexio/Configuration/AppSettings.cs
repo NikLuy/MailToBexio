@@ -7,13 +7,16 @@ public class GraphSettings
     public string ClientSecret { get; set; } = string.Empty;
     public string TargetMailboxUpn { get; set; } = string.Empty;
     public string MailFolderName { get; set; } = "Kunden_Erfassung";
-    public string ErrorFolderName { get; set; } = "Fehler";
+    public string ProcessedFolderName { get; set; } = "Done";
+    public string ErrorFolderName { get; set; } = "Fault";
 }
 
 public class BexioSettings
 {
-    public string BaseUrl { get; set; } = "https://api.bexio.com/2.0";
+    public string BaseUrl { get; set; } = "https://api.bexio.com/2.0/";
     public string ApiKey { get; set; } = string.Empty;
+    public int UserId { get; set; } = 1;
+    public int OwnerId { get; set; } = 1;
 }
 
 public class AiSettings
@@ -30,7 +33,7 @@ public class AiSettings
 
     // Ollama (lokal)
     public string OllamaBaseUrl { get; set; } = "http://localhost:11434";
-    public string OllamaModel { get; set; } = "llama3";
+    public string OllamaModel { get; set; } = "qwen2.5:7b";
 }
 
 public class WorkerSettings

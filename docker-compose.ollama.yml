@@ -1,0 +1,43 @@
+services:
+  mailtobexio:
+    depends_on:
+      ollama:
+        condition: service_healthy
+      ollama-pull:
+        condition: service_completed_successfully
+    environment:
+      AI_PROVIDER: Ollama
+      AI__Provider: Ollama
+      OLLAMA_BASE_URL: http://ollama:11434
+      AI__OllamaBaseUrl: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
+      AI__OllamaModel: ${OLLAMA_MODEL:-qwen2.5:7b}
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: mailtobexio-ollama
+    restart: unless-stopped
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  ollama-pull:
+    image: ollama/ollama:latest
+    container_name: mailtobexio-ollama-pull
+    restart: "no"
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    command: ["pull", "${OLLAMA_MODEL:-qwen2.5:7b}"]
+
+volumes:
+  ollama-data:

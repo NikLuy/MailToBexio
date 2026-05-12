@@ -82,6 +82,9 @@ cp .env.example .env
 dotnet restore
 dotnet run --project src/MailToBexio
 
+# Alternativ mit Ollama in Docker starten
+docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d --build
+
 # Tests ausführen
 dotnet test
 ```
@@ -91,6 +94,8 @@ dotnet test
 ```bash
 git pull
 docker compose up -d --build
+# mit Ollama:
+docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d --build
 ```
 
 ## Haftungsausschluss

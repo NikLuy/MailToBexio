@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Text.Json;
 using MailToBexio.Configuration;
 using MailToBexio.Models;
 using MailToBexio.Services;
@@ -43,7 +44,7 @@ public class BexioServiceTests
     };
 
     [Fact]
-    public async Task CreateContact_EmailAlreadyExists_ReturnsFalse()
+    public async Task CreateContact_EmailAlreadyExists_ReturnsAlreadyExists()
     {
         var (svc, mock) = BuildService();
 
@@ -53,7 +54,7 @@ public class BexioServiceTests
 
         var result = await svc.CreateContactIfNotExistsAsync(ValidCustomer());
 
-        Assert.False(result);
+        Assert.Equal(BexioContactResult.AlreadyExists, result);
     }
 
     [Fact]
@@ -84,13 +85,13 @@ public class BexioServiceTests
 
         var result = await svc.CreateContactIfNotExistsAsync(ValidCustomer());
 
-        Assert.True(result);
+        Assert.Equal(BexioContactResult.Created, result);
         // Nur ein POST /contact (Kontaktperson — Firma existiert bereits, wird nicht neu angelegt)
         Assert.Equal(1, postCount);
     }
 
     [Fact]
-    public async Task CreateContact_PersonAlreadyExists_ReturnsFalse()
+    public async Task CreateContact_PersonAlreadyExists_ReturnsAlreadyExists()
     {
         var (svc, mock) = BuildService();
         var data = new CustomerData
@@ -114,7 +115,7 @@ public class BexioServiceTests
 
         var result = await svc.CreateContactIfNotExistsAsync(data);
 
-        Assert.False(result);
+        Assert.Equal(BexioContactResult.AlreadyExists, result);
     }
 
     [Fact]
@@ -135,8 +136,98 @@ public class BexioServiceTests
 
         var result = await svc.CreateContactIfNotExistsAsync(ValidCustomer());
 
-        Assert.True(result);
+        Assert.Equal(BexioContactResult.Created, result);
         Assert.Equal(2, postCount); // Firma + Kontaktperson
+    }
+
+    [Fact]
+    public async Task CreateContact_CompanyOnly_CreatesCompanyAndSkipsPerson()
+    {
+        var (svc, mock) = BuildService();
+
+        mock.When(HttpMethod.Post, "*/contact/search")
+            .Respond("application/json", "[]");
+
+        var postCount = 0;
+        mock.When(HttpMethod.Post, "*/contact")
+            .Respond(_ =>
+            {
+                postCount++;
+                return Task.FromResult(JsonResponse("{\"id\":123,\"contact_type_id\":1}"));
+            });
+
+        var result = await svc.CreateContactIfNotExistsAsync(new CustomerData
+        {
+            CompanyName = "Kirchgemeinde Steinen",
+            Email = "admin@kirchgemeinde-steinen.ch"
+        });
+
+        Assert.Equal(BexioContactResult.Created, result);
+        Assert.Equal(1, postCount);
+    }
+
+    [Fact]
+    public async Task CreateContact_PostsCurrentBexioFields()
+    {
+        var settings = new BexioSettings { UserId = 7, OwnerId = 9 };
+        var mockHttp = new MockHttpMessageHandler();
+        var client = mockHttp.ToHttpClient();
+        client.BaseAddress = new Uri("https://api.bexio.com/2.0/");
+        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        var factory = Substitute.For<IHttpClientFactory>();
+        factory.CreateClient("Bexio").Returns(client);
+
+        var svc = new BexioService(factory, Options.Create(settings), NullLogger<BexioService>.Instance);
+
+        mockHttp.When(HttpMethod.Post, "*/contact/search")
+            .Respond("application/json", "[]");
+
+        string? lastContactBody = null;
+        mockHttp.When(HttpMethod.Post, "*/contact")
+            .Respond(async req =>
+            {
+                lastContactBody = await req.Content!.ReadAsStringAsync();
+                return JsonResponse("{\"id\":1,\"contact_type_id\":2}");
+            });
+
+        await svc.CreateContactIfNotExistsAsync(new CustomerData
+        {
+            LastName = "Muster",
+            FirstName = "Max",
+            Email = "max@muster.ch",
+            Street = "Bahnhofstrasse 1",
+            Zip = "8001",
+            City = "Zürich"
+        });
+
+        Assert.NotNull(lastContactBody);
+        using var doc = JsonDocument.Parse(lastContactBody!);
+        var root = doc.RootElement;
+
+        Assert.False(root.TryGetProperty("address", out _));
+        Assert.Equal("Muster", root.GetProperty("name_1").GetString());
+        Assert.Equal("Max", root.GetProperty("name_2").GetString());
+        Assert.Equal("Bahnhofstrasse", root.GetProperty("street_name").GetString());
+        Assert.Equal("1", root.GetProperty("house_number").GetString());
+        Assert.Equal(7, root.GetProperty("user_id").GetInt32());
+        Assert.Equal(9, root.GetProperty("owner_id").GetInt32());
+    }
+
+    [Fact]
+    public async Task CreateContact_PostFails_ReturnsFailed()
+    {
+        var (svc, mock) = BuildService();
+
+        mock.When(HttpMethod.Post, "*/contact/search")
+            .Respond("application/json", "[]");
+
+        mock.When(HttpMethod.Post, "*/contact")
+            .Respond(HttpStatusCode.NotFound);
+
+        var result = await svc.CreateContactIfNotExistsAsync(ValidCustomer());
+
+        Assert.Equal(BexioContactResult.Failed, result);
     }
 
     [Theory]

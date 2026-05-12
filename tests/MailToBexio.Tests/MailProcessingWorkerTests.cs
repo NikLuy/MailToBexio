@@ -25,8 +25,14 @@ public class MailProcessingWorkerTests
             NullLogger<MailProcessingWorker>.Instance);
     }
 
-    private static Message FakeMessage(string id = "msg-001", string body = "Mail-Inhalt") =>
-        new() { Id = id, Body = new ItemBody { Content = body } };
+    private static Message FakeMessage(string id = "msg-001", string body = "Mail-Inhalt", string? senderEmail = null) =>
+        new()
+        {
+            Id = id,
+            Body = new ItemBody { Content = body },
+            From = senderEmail is null ? null : new Recipient { EmailAddress = new EmailAddress { Address = senderEmail } },
+            Sender = senderEmail is null ? null : new Recipient { EmailAddress = new EmailAddress { Address = senderEmail } }
+        };
 
     [Fact]
     public async Task ProcessCycle_NoMessages_NeverCallsAiOrBexio()
@@ -46,7 +52,7 @@ public class MailProcessingWorkerTests
     }
 
     [Fact]
-    public async Task ProcessCycle_ValidMessage_CreatesContactAndMarksRead()
+    public async Task ProcessCycle_ValidMessage_CreatesContactAndMovesToProcessedFolder()
     {
         var graph = Substitute.For<IGraphMailService>();
         var ai = Substitute.For<IAIService>();
@@ -61,13 +67,13 @@ public class MailProcessingWorkerTests
           .Returns(Task.FromResult<CustomerData?>(extracted));
 
         bexio.CreateContactIfNotExistsAsync(Arg.Any<CustomerData>(), Arg.Any<CancellationToken>())
-             .Returns(Task.FromResult(true));
+             .Returns(Task.FromResult(BexioContactResult.Created));
 
         var worker = BuildWorker(graph, ai, bexio);
         await worker.ProcessCycleAsync(CancellationToken.None);
 
         await bexio.Received(1).CreateContactIfNotExistsAsync(extracted, Arg.Any<CancellationToken>());
-        await graph.Received(1).MarkAsReadAsync("msg-001", Arg.Any<CancellationToken>());
+        await graph.Received(1).MoveToProcessedFolderAsync("msg-001", Arg.Any<CancellationToken>());
         await graph.DidNotReceive().MoveToErrorFolderAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
@@ -89,7 +95,7 @@ public class MailProcessingWorkerTests
 
         await graph.Received(1).MoveToErrorFolderAsync("msg-001", Arg.Any<CancellationToken>());
         await bexio.DidNotReceive().CreateContactIfNotExistsAsync(Arg.Any<CustomerData>(), Arg.Any<CancellationToken>());
-        await graph.DidNotReceive().MarkAsReadAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await graph.DidNotReceive().MoveToProcessedFolderAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -114,6 +120,32 @@ public class MailProcessingWorkerTests
     }
 
     [Fact]
+    public async Task ProcessCycle_AiMissesEmail_UsesSenderEmailFallback()
+    {
+        var graph = Substitute.For<IGraphMailService>();
+        var ai = Substitute.For<IAIService>();
+        var bexio = Substitute.For<IBexioService>();
+
+        graph.GetUnreadMessagesAsync(Arg.Any<CancellationToken>())
+             .Returns(Task.FromResult<IList<Message>>([FakeMessage(senderEmail: "info@gartenbau.ch")]));
+
+        ai.ExtractCustomerInfoAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+          .Returns(Task.FromResult<CustomerData?>(
+              new CustomerData { CompanyName = "Gartenbau AG" }));
+
+        bexio.CreateContactIfNotExistsAsync(Arg.Any<CustomerData>(), Arg.Any<CancellationToken>())
+             .Returns(Task.FromResult(BexioContactResult.Created));
+
+        var worker = BuildWorker(graph, ai, bexio);
+        await worker.ProcessCycleAsync(CancellationToken.None);
+
+        await bexio.Received(1).CreateContactIfNotExistsAsync(
+            Arg.Is<CustomerData>(data => data.Email == "info@gartenbau.ch" && data.CompanyName == "Gartenbau AG"),
+            Arg.Any<CancellationToken>());
+        await graph.Received(1).MoveToProcessedFolderAsync("msg-001", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task ProcessCycle_MultipleMessages_ProcessesAll()
     {
         var graph = Substitute.For<IGraphMailService>();
@@ -132,19 +164,19 @@ public class MailProcessingWorkerTests
               new CustomerData { Email = "test@example.com", LastName = "Test" }));
 
         bexio.CreateContactIfNotExistsAsync(Arg.Any<CustomerData>(), Arg.Any<CancellationToken>())
-             .Returns(Task.FromResult(true));
+             .Returns(Task.FromResult(BexioContactResult.Created));
 
         var worker = BuildWorker(graph, ai, bexio);
         await worker.ProcessCycleAsync(CancellationToken.None);
 
         await ai.Received(3).ExtractCustomerInfoAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
-        await graph.Received(1).MarkAsReadAsync("msg-001", Arg.Any<CancellationToken>());
-        await graph.Received(1).MarkAsReadAsync("msg-002", Arg.Any<CancellationToken>());
-        await graph.Received(1).MarkAsReadAsync("msg-003", Arg.Any<CancellationToken>());
+        await graph.Received(1).MoveToProcessedFolderAsync("msg-001", Arg.Any<CancellationToken>());
+        await graph.Received(1).MoveToProcessedFolderAsync("msg-002", Arg.Any<CancellationToken>());
+        await graph.Received(1).MoveToProcessedFolderAsync("msg-003", Arg.Any<CancellationToken>());
     }
 
     [Fact]
-    public async Task ProcessCycle_DuplicateContact_StillMarksRead()
+    public async Task ProcessCycle_DuplicateContact_StillMovesToProcessedFolder()
     {
         var graph = Substitute.For<IGraphMailService>();
         var ai = Substitute.For<IAIService>();
@@ -157,14 +189,38 @@ public class MailProcessingWorkerTests
           .Returns(Task.FromResult<CustomerData?>(
               new CustomerData { Email = "existing@muster.ch", LastName = "Muster" }));
 
-        // Kontakt bereits vorhanden → false
+        // Kontakt bereits vorhanden
         bexio.CreateContactIfNotExistsAsync(Arg.Any<CustomerData>(), Arg.Any<CancellationToken>())
-             .Returns(Task.FromResult(false));
+             .Returns(Task.FromResult(BexioContactResult.AlreadyExists));
 
         var worker = BuildWorker(graph, ai, bexio);
         await worker.ProcessCycleAsync(CancellationToken.None);
 
-        // Mail trotzdem als gelesen markieren
-        await graph.Received(1).MarkAsReadAsync("msg-001", Arg.Any<CancellationToken>());
+        // Mail trotzdem aus dem Eingangsordner verschieben
+        await graph.Received(1).MoveToProcessedFolderAsync("msg-001", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ProcessCycle_BexioFails_LeavesMessageUnread()
+    {
+        var graph = Substitute.For<IGraphMailService>();
+        var ai = Substitute.For<IAIService>();
+        var bexio = Substitute.For<IBexioService>();
+
+        graph.GetUnreadMessagesAsync(Arg.Any<CancellationToken>())
+             .Returns(Task.FromResult<IList<Message>>([FakeMessage()]));
+
+        ai.ExtractCustomerInfoAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+          .Returns(Task.FromResult<CustomerData?>(
+              new CustomerData { Email = "failing@muster.ch", LastName = "Muster" }));
+
+        bexio.CreateContactIfNotExistsAsync(Arg.Any<CustomerData>(), Arg.Any<CancellationToken>())
+             .Returns(Task.FromResult(BexioContactResult.Failed));
+
+        var worker = BuildWorker(graph, ai, bexio);
+        await worker.ProcessCycleAsync(CancellationToken.None);
+
+        await graph.DidNotReceive().MoveToProcessedFolderAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await graph.DidNotReceive().MoveToErrorFolderAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 }

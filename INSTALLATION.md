@@ -49,10 +49,10 @@ MailToBexio verwendet **App-Only Authentication** (Client Credentials Flow). Es 
 ### 2.2 API-Berechtigung hinzufügen
 
 1. **API-Berechtigungen** → **Berechtigung hinzufügen** → **Microsoft Graph** → **Anwendungsberechtigungen**
-2. Suche nach `Mail.Read` → **Anwendungsberechtigung** auswählen (nicht delegiert!)
+2. Suche nach `Mail.ReadWrite` → **Anwendungsberechtigung** auswählen (nicht delegiert!)
 3. **Administratorzustimmung erteilen** (Button ganz oben)
 
-<!-- Screenshot: API-Berechtigungen mit Mail.Read (Anwendung) und Admin-Zustimmung erteilt -->
+<!-- Screenshot: API-Berechtigungen mit Mail.ReadWrite (Anwendung) und Admin-Zustimmung erteilt -->
 ![Azure API Permissions](docs/images/azure-03-api-permissions.png)
 
 ### 2.3 Client Secret erstellen
@@ -85,13 +85,16 @@ Ersetze:
 - `<AZURE_CLIENT_ID>` → Client-ID aus Schritt 2.1
 - `<TARGET_MAILBOX_UPN>` → E-Mail-Adresse des Zielpostfachs (z.B. `bestellungen@example.com`)
 
-### 2.5 Outlook-Ordner anlegen
+### 2.5 Outlook-Ordner
 
-Im Zielpostfach zwei Ordner erstellen:
+Im Zielpostfach muss der Eingangsordner existieren:
 - `Kunden_Erfassung` — eingehende Kunden-Mails werden hierhin verschoben
-- `Fehler` — Mails die nicht geparst werden konnten
 
-<!-- Screenshot: Outlook Ordnerstruktur mit Kunden_Erfassung und Fehler -->
+Die Unterordner werden bei Bedarf automatisch erstellt:
+- `Kunden_Erfassung/Done` — erfolgreich verarbeitete Mails
+- `Kunden_Erfassung/Fault` — Mails die nicht geparst werden konnten
+
+<!-- Screenshot: Outlook Ordnerstruktur mit Kunden_Erfassung, Done und Fault -->
 ![Outlook Ordner](docs/images/outlook-01-folders.png)
 
 ---
@@ -157,7 +160,7 @@ Geeignet für lokale Tests ohne externe API-Kosten.
 
 ```bash
 # Ollama installieren (https://ollama.com)
-ollama pull llama3
+ollama pull qwen2.5:7b
 ollama serve  # läuft auf http://localhost:11434
 ```
 
@@ -165,8 +168,16 @@ In `.env` setzen:
 ```dotenv
 AI_PROVIDER=Ollama
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama3
+OLLAMA_MODEL=qwen2.5:7b
 ```
+
+Oder Ollama direkt mit Docker Compose starten:
+```bash
+docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d --build
+```
+
+Dabei wird `OLLAMA_MODEL` automatisch in das Docker-Volume `ollama-data` geladen und die App nutzt intern `http://ollama:11434`.
+`http://localhost:11434` funktioniert nur, wenn MailToBexio direkt auf dem Host läuft. Im Docker-Container muss Ollama über den Compose-Service-Namen `ollama` erreichbar sein.
 
 ---
 
@@ -184,6 +195,9 @@ cp .env.example .env
 | `AZURE_CLIENT_ID` | App Registration Client-ID | Schritt 2.1 |
 | `AZURE_CLIENT_SECRET` | Client Secret Wert | Schritt 2.3 |
 | `TARGET_MAILBOX_UPN` | E-Mail des Zielpostfachs | IT-Admin |
+| `TARGET_MAILBOX_FOLDER` | Ordner mit den zu verarbeitenden Mails | Outlook |
+| `TARGET_MAILBOX_DONE_FOLDER` | Unterordner fuer erfolgreich verarbeitete Mails | Outlook |
+| `TARGET_MAILBOX_FAULT_FOLDER` | Unterordner fuer nicht verarbeitbare Mails | Outlook |
 | `BEXIO_API_KEY` | bexio API-Schlüssel | Schritt 3 |
 | `AI_PROVIDER` | `Copilot` / `Gemini` / `Ollama` | Schritt 4 |
 | `COPILOT_ENDPOINT` | Azure OpenAI Endpunkt-URL | Schritt 4.1 |
@@ -191,6 +205,8 @@ cp .env.example .env
 | `COPILOT_DEPLOYMENT_NAME` | Deployment-Name (z.B. `gpt-4o`) | Schritt 4.1 |
 | `GEMINI_API_KEY` | Google Gemini API-Key | Schritt 4.2 |
 | `OLLAMA_BASE_URL` | Ollama Server URL | Schritt 4.3 |
+| `OLLAMA_MODEL` | Ollama Modellname (z.B. `qwen2.5:7b`) | Schritt 4.3 |
+| `OLLAMA_PORT` | Host-Port fuer den Ollama Container (Standard: `11434`) | Schritt 4.3 |
 | `WORKER_INTERVAL_MINUTES` | Abfrageintervall in Minuten (Standard: 5) | — |
 
 > **Sicherheit:** Die `.env`-Datei **niemals** ins Git committen — sie ist in `.gitignore` eingetragen.
@@ -274,10 +290,10 @@ Alle N Minuten (Standard: 5):
   ├── Pro Mail:
   │   ├── KI extrahiert Kontaktdaten (JSON)
   │   ├── Validierung (E-Mail + Name vorhanden?)
-  │   │   └── Ungültig → Mail in "Fehler" verschieben
+  │   │   └── Ungültig → Mail in "Fault" verschieben
   │   ├── bexio: Suche nach E-Mail → Firma → Person
-  │   │   └── Treffer → Mail als gelesen markieren, kein Kontakt angelegt
-  │   └── Kein Treffer → Firma + Kontaktperson anlegen → Mail als gelesen markieren
+  │   │   └── Treffer → Mail in "Done" verschieben, kein Kontakt angelegt
+  │   └── Kein Treffer → Firma + Kontaktperson anlegen → Mail in "Done" verschieben
   └── Warten bis zum nächsten Zyklus
 ```
 
@@ -289,13 +305,13 @@ Alle N Minuten (Standard: 5):
 | `Keine neuen Nachrichten` | Kein Handlungsbedarf |
 | `Kontakt mit E-Mail X existiert bereits` | Duplikat erkannt, korrekt übersprungen |
 | `Firma 'X' angelegt` | Neuer bexio-Kontakt erstellt |
-| `KI konnte keine validen Daten extrahieren` | Mail landet im Fehler-Ordner |
+| `KI konnte keine validen Daten extrahieren` | Mail landet im Fault-Ordner |
 | `Graph API Fehler` | Azure-Verbindungsproblem prüfen |
 | `bexio POST /contact Fehler` | bexio API-Key oder Payload prüfen |
 
-### Fehler-Ordner überwachen
+### Fault-Ordner überwachen
 
-Mails im Ordner `Fehler` sollten regelmässig manuell überprüft werden. Mögliche Ursachen:
+Mails im Ordner `Fault` sollten regelmässig manuell überprüft werden. Mögliche Ursachen:
 - E-Mail enthält keine strukturierten Kontaktdaten
 - KI hat halluziniert und kein valides JSON zurückgegeben
 - E-Mail-Body ist leer oder verschlüsselt (z.B. S/MIME)

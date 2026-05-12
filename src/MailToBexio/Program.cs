@@ -29,7 +29,10 @@ try
     var bexioSettings = builder.Configuration.GetSection("Bexio").Get<BexioSettings>()!;
     builder.Services.AddHttpClient("Bexio", client =>
     {
-        client.BaseAddress = new Uri(bexioSettings.BaseUrl);
+        var baseUrl = bexioSettings.BaseUrl.EndsWith('/')
+            ? bexioSettings.BaseUrl
+            : $"{bexioSettings.BaseUrl}/";
+        client.BaseAddress = new Uri(baseUrl);
         client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", bexioSettings.ApiKey);
         client.DefaultRequestHeaders.Accept.Add(

@@ -23,8 +23,14 @@ public class BexioContact
     [JsonPropertyName("phone_fixed")]
     public string? PhoneFixed { get; set; }
 
-    [JsonPropertyName("address")]
-    public string? Address { get; set; }
+    [JsonPropertyName("street_name")]
+    public string? StreetName { get; set; }
+
+    [JsonPropertyName("house_number")]
+    public string? HouseNumber { get; set; }
+
+    [JsonPropertyName("address_addition")]
+    public string? AddressAddition { get; set; }
 
     [JsonPropertyName("postcode")]
     public string? Postcode { get; set; }
@@ -38,6 +44,12 @@ public class BexioContact
     // Referenz auf übergeordnete Firma (bei Kontaktpersonen)
     [JsonPropertyName("contact_group_ids")]
     public List<int>? ContactGroupIds { get; set; }
+
+    [JsonPropertyName("user_id")]
+    public int? UserId { get; set; }
+
+    [JsonPropertyName("owner_id")]
+    public int? OwnerId { get; set; }
 }
 
 public class BexioSearchRequest

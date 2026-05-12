@@ -11,7 +11,12 @@ services:
       - Graph__ClientId=${AZURE_CLIENT_ID}
       - Graph__ClientSecret=${AZURE_CLIENT_SECRET}
       - Graph__TargetMailboxUpn=${TARGET_MAILBOX_UPN}
+      - Graph__MailFolderName=${TARGET_MAILBOX_FOLDER}
+      - Graph__ProcessedFolderName=${TARGET_MAILBOX_DONE_FOLDER}
+      - Graph__ErrorFolderName=${TARGET_MAILBOX_FAULT_FOLDER}
       - Bexio__ApiKey=${BEXIO_API_KEY}
+      - Bexio__UserId=${BEXIO_USER_ID}
+      - Bexio__OwnerId=${BEXIO_OWNER_ID}
       - AI__Provider=${AI_PROVIDER}
       - AI__CopilotEndpoint=${COPILOT_ENDPOINT}
       - AI__CopilotApiKey=${COPILOT_API_KEY}

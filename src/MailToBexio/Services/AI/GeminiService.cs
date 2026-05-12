@@ -15,6 +15,14 @@ public class GeminiService : IAIService
     private const string Prompt = """
         Extrahiere aus dieser E-Mail die Kontaktdaten und gib sie ausschliesslich als valides JSON zurück.
         Kein Markdown, kein Codeblock, nur reines JSON.
+                Trenne Organisation und Person strikt:
+                - companyName nur fuer echte Organisationen, Firmen, Institutionen oder Teams.
+                - firstName/lastName nur fuer eine klar erkennbare Kontaktperson.
+                - Ziehe einen Namen aus einer Signatur nicht automatisch als Person heran, wenn er als Absender-/Footer-Block ohne klare Personenkontext erscheint.
+                - Wenn ein Mail-Footer eine Organisation enthaelt und daneben eine Personensignatur steht, gib beides separat zurueck.
+                - Wenn nur die Organisation erkennbar ist, lasse firstName und lastName auf null.
+                - Wenn nur die Person erkennbar ist, lasse companyName auf null.
+                Bevorzuge fuer companyName nur eindeutige Organisationshinweise wie Rechtsformen, Institutionen, Abteilungen oder Firmenbezeichnungen.
         Schema:
         {
           "companyName": "string oder null",

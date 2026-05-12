@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using MailToBexio.Configuration;
 using MailToBexio.Models;
 using Microsoft.Extensions.Logging;
@@ -10,23 +11,33 @@ namespace MailToBexio.Services;
 
 public interface IBexioService
 {
-    Task<bool> CreateContactIfNotExistsAsync(CustomerData data, CancellationToken ct = default);
+    Task<BexioContactResult> CreateContactIfNotExistsAsync(CustomerData data, CancellationToken ct = default);
+}
+
+public enum BexioContactResult
+{
+    Created,
+    AlreadyExists,
+    Failed
 }
 
 public class BexioService : IBexioService
 {
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
+    private static readonly Regex StreetRegex = new("^(?<street>.+?)\\s+(?<house>[0-9][0-9a-zA-Z\\-/]*)$", RegexOptions.Compiled);
 
     private readonly HttpClient _http;
     private readonly ILogger<BexioService> _logger;
+    private readonly BexioSettings _settings;
 
     public BexioService(IHttpClientFactory httpFactory, IOptions<BexioSettings> settings, ILogger<BexioService> logger)
     {
         _http = httpFactory.CreateClient("Bexio");
         _logger = logger;
+        _settings = settings.Value;
     }
 
-    public async Task<bool> CreateContactIfNotExistsAsync(CustomerData data, CancellationToken ct = default)
+    public async Task<BexioContactResult> CreateContactIfNotExistsAsync(CustomerData data, CancellationToken ct = default)
     {
         // Stufe 1: E-Mail-Adresse
         if (!string.IsNullOrWhiteSpace(data.Email))
@@ -36,7 +47,7 @@ public class BexioService : IBexioService
             {
                 _logger.LogInformation("Kontakt mit E-Mail {Email} existiert bereits (ID {Id}) — übersprungen",
                     data.Email, byEmail[0].Id);
-                return false;
+                return BexioContactResult.AlreadyExists;
             }
         }
 
@@ -65,7 +76,7 @@ public class BexioService : IBexioService
             {
                 _logger.LogInformation("Person '{Name}' existiert bereits (ID {Id}) — übersprungen",
                     personName, byPerson[0].Id);
-                return false;
+                return BexioContactResult.AlreadyExists;
             }
         }
 
@@ -74,19 +85,28 @@ public class BexioService : IBexioService
         {
             var newCompany = BuildContact(data, isCompany: true, parentId: null);
             existingCompanyId = await PostContactAsync(newCompany, ct);
-            if (existingCompanyId is null) return false;
+            if (existingCompanyId is null) return BexioContactResult.Failed;
 
             _logger.LogInformation("Firma '{Name}' angelegt (ID {Id})", data.CompanyName, existingCompanyId);
+        }
+
+        var hasPersonName = !string.IsNullOrWhiteSpace(data.LastName) || !string.IsNullOrWhiteSpace(data.FirstName);
+
+        if (!hasPersonName)
+        {
+            _logger.LogInformation(
+                "Keine Kontaktperson-Daten vorhanden für Nachricht; nur Firma wird verarbeitet");
+            return BexioContactResult.Created;
         }
 
         // Kontaktperson anlegen
         var contact = BuildContact(data, isCompany: false, parentId: existingCompanyId);
         var contactId = await PostContactAsync(contact, ct);
-        if (contactId is null) return false;
+        if (contactId is null) return BexioContactResult.Failed;
 
         _logger.LogInformation("Kontaktperson '{First} {Last}' angelegt (ID {Id})",
             data.FirstName, data.LastName, contactId);
-        return true;
+        return BexioContactResult.Created;
     }
 
     private async Task<List<BexioContact>> SearchContactAsync(string field, string value, CancellationToken ct)
@@ -95,7 +115,7 @@ public class BexioService : IBexioService
 
         try
         {
-            var response = await _http.PostAsJsonAsync("/contact/search", body, ct);
+            var response = await _http.PostAsJsonAsync("contact/search", body, ct);
             if (!response.IsSuccessStatusCode) return [];
 
             var result = await response.Content.ReadFromJsonAsync<List<BexioContact>>(JsonOpts, ct);
@@ -112,7 +132,7 @@ public class BexioService : IBexioService
     {
         try
         {
-            var response = await _http.PostAsJsonAsync("/contact", contact, ct);
+            var response = await _http.PostAsJsonAsync("contact", contact, ct);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -131,19 +151,38 @@ public class BexioService : IBexioService
         }
     }
 
-    private static BexioContact BuildContact(CustomerData data, bool isCompany, int? parentId) =>
-        new()
+    private BexioContact BuildContact(CustomerData data, bool isCompany, int? parentId)
+    {
+        var street = SplitStreet(Sanitize(data.Street));
+
+        return new BexioContact
         {
             ContactTypeId = isCompany ? 1 : 2,
             Name1 = Sanitize(isCompany ? data.CompanyName : data.LastName),
             Name2 = isCompany ? null : Sanitize(data.FirstName),
             Mail = Sanitize(data.Email),
             PhoneFixed = Sanitize(data.Phone),
-            Address = Sanitize(data.Street),
+            StreetName = street.streetName,
+            HouseNumber = street.houseNumber,
             Postcode = Sanitize(data.Zip),
             City = Sanitize(data.City),
-            ContactGroupIds = parentId.HasValue ? [parentId.Value] : (List<int>?)null
+            ContactGroupIds = parentId.HasValue ? [parentId.Value] : null,
+            UserId = _settings.UserId,
+            OwnerId = _settings.OwnerId
         };
+    }
+
+    private static (string? streetName, string? houseNumber) SplitStreet(string? street)
+    {
+        if (string.IsNullOrWhiteSpace(street))
+            return (null, null);
+
+        var match = StreetRegex.Match(street);
+        if (!match.Success)
+            return (street, null);
+
+        return (Sanitize(match.Groups["street"].Value), Sanitize(match.Groups["house"].Value));
+    }
 
     // Entfernt Steuerzeichen und begrenzt Länge — verhindert Injection in die bexio API
     internal static string? Sanitize(string? value)
